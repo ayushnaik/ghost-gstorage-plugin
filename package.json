@@ -1,6 +1,6 @@
 {
   "name": "ghost-gstorage-plugin",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "A Ghost Blog storage adapter plugin for Google Cloud Storage, enabling seamless integration and management of media files.",
   "main": "index.js",
   "scripts": {
