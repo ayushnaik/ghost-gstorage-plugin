@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "description": "A Ghost Blog storage adapter plugin for Google Cloud Storage, enabling seamless integration and management of media files.",
   "main": "index.js",
-  "private": true,
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
