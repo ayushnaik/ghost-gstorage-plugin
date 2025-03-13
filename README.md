@@ -84,13 +84,13 @@ Before you begin, ensure you have met the following requirements:
    "storage": {
      "active": "gcloud",
      "gcloud": {
-       "projectId": "simpledirect-blog",
-       "bucket": "ghost-blog-data",
-       "key": "/var/www/ghost/ghost-storage-key.json",
-       "assetDomain": "https://storage.googleapis.com/ghost-blog-data",
-       "uploadFolderPath": "simpledirect-blog/content/images",
-       "insecure": true,
-       "maxAge": "2678400"
+       "projectId": "<your-project-id>",
+       "bucket": "<your-bucket-name>",
+       "key": "<path-to-your-service-account-key.json>",
+       "assetDomain": "<your-asset-domain>",
+       "uploadFolderPath": "<your-upload-folder-path>",
+       "insecure": <true-or-false>,
+       "maxAge": "<cache-control-max-age-in-seconds>"
      }
    }
    ```
