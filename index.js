@@ -6,8 +6,6 @@ const BaseStore = require("ghost-storage-base");
 const path = require("path");
 const mime = require("mime-types");
 
-let options = {};
-
 /**
  * GStore class extends BaseStore to provide Google Cloud Storage functionality.
  */
@@ -20,46 +18,52 @@ class GStore extends BaseStore {
    */
   constructor(config = {}) {
     super(config);
-    options = config;
+    this.options = config;
 
     // Initialize Google Cloud Storage client.
     const gcs = new Storage({
-      projectId: options.projectId,
-      keyFilename: options.key,
+      projectId: this.options.projectId,
+      keyFilename: this.options.key,
     });
-    this.bucket = gcs.bucket(options.bucket);
+    this.bucket = gcs.bucket(this.options.bucket);
 
-    // Parse assetDomain if provided as full URL.
-    if (options.assetDomain && options.assetDomain.match(/^https?:\/\//i)) {
+    this._initializeAssetDomain();
+    this.insecure = !!this.options.insecure;
+    this.maxAge = this.options.maxAge || 2678400;
+  }
+
+  /**
+   * Initializes the asset domain and base path based on the configuration.
+   */
+  _initializeAssetDomain() {
+    const { assetDomain, bucket, insecure, basePath, uploadFolderPath } =
+      this.options;
+
+    if (assetDomain && assetDomain.match(/^https?:\/\//i)) {
       try {
-        const url = new URL(options.assetDomain);
-        const segments = url.pathname.split("/").filter((segment) => segment);
-        if (segments.length && segments[0] === options.bucket) {
-          segments.shift();
-        }
+        const url = new URL(assetDomain);
+        const segments = url.pathname.split("/").filter(Boolean);
+        if (segments[0] === bucket) segments.shift();
         this.basePath = segments.join("/");
-        this.assetDomain = `${url.protocol}//${url.host}/${options.bucket}`;
-      } catch (err) {
-        this.assetDomain = options.assetDomain.replace(/\/+$/, "");
-        this.basePath = options.basePath || "";
+        this.assetDomain = `${url.protocol}//${url.host}/${bucket}`;
+      } catch {
+        this.assetDomain = assetDomain.replace(/\/+$/, "");
+        this.basePath = basePath || "";
       }
     } else {
-      this.assetDomain = options.insecure
-        ? `http://${options.bucket}.storage.googleapis.com`
-        : `https://${options.bucket}.storage.googleapis.com`;
-      this.basePath = options.basePath || "";
+      this.assetDomain = insecure
+        ? `http://${bucket}.storage.googleapis.com`
+        : `https://${bucket}.storage.googleapis.com`;
+      this.basePath = basePath || "";
     }
 
-    if (options.uploadFolderPath) {
-      this.basePath = options.uploadFolderPath;
+    if (uploadFolderPath) {
+      this.basePath = uploadFolderPath;
     }
 
     if (this.basePath) {
       this.basePath = this.basePath.replace(/^\/+|\/+$/g, "");
     }
-
-    this.insecure = !!options.insecure;
-    this.maxAge = options.maxAge || 2678400;
   }
 
   /**
@@ -69,8 +73,8 @@ class GStore extends BaseStore {
    */
   getTargetDir() {
     const now = new Date();
-    const year = now.getFullYear().toString();
-    const month = ("0" + (now.getMonth() + 1)).slice(-2);
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, "0");
     return `${year}/${month}`;
   }
 
@@ -82,12 +86,11 @@ class GStore extends BaseStore {
    * @return {string} The complete storage key (with forward slashes).
    */
   getUniqueFileName(file, targetDir) {
-    let originalName =
+    const originalName =
       file.name || (file.path && path.basename(file.path)) || "file";
-    let ext = path.extname(originalName) || ".jpg";
-    let baseName = path.basename(originalName, ext) || "file";
-    const now = Date.now();
-    const uniqueName = `${baseName}-${now}${ext}`;
+    const ext = path.extname(originalName) || ".jpg";
+    const baseName = path.basename(originalName, ext) || "file";
+    const uniqueName = `${baseName}-${Date.now()}${ext}`;
     return path.join(targetDir, uniqueName).replace(/\\/g, "/");
   }
 
@@ -99,13 +102,13 @@ class GStore extends BaseStore {
    * @throws Will throw an error if Google Cloud Storage is not configured.
    */
   async save(image) {
-    if (!options) {
+    if (!this.options) {
       throw new Error("Google Cloud Storage is not configured.");
     }
 
     const dateFolder = this.getTargetDir();
     const targetDir = this.basePath
-      ? [this.basePath, dateFolder].join("/")
+      ? `${this.basePath}/${dateFolder}`
       : dateFolder;
     const storageKey = this.getUniqueFileName(image, targetDir);
 
@@ -116,16 +119,15 @@ class GStore extends BaseStore {
       destination: storageKey,
       metadata: {
         cacheControl: `public, max-age=${this.maxAge}`,
-        contentType: contentType,
+        contentType,
       },
       public: true,
     };
 
     await this.bucket.upload(image.path, opts);
 
-    let baseDomain = this.assetDomain.replace(/\/+$/, "");
-    const publicUrl = `${baseDomain}/${storageKey}`;
-    return publicUrl;
+    const baseDomain = this.assetDomain.replace(/\/+$/, "");
+    return `${baseDomain}/${storageKey}`;
   }
 
   /**
@@ -134,9 +136,7 @@ class GStore extends BaseStore {
    * @returns {Function} A middleware function.
    */
   serve() {
-    return function (req, res, next) {
-      next();
-    };
+    return (req, res, next) => next();
   }
 
   /**
@@ -148,8 +148,8 @@ class GStore extends BaseStore {
    */
   async exists(filename, targetDir) {
     const filePath = path.join(targetDir, filename);
-    const data = await this.bucket.file(filePath).exists();
-    return data[0];
+    const [exists] = await this.bucket.file(filePath).exists();
+    return exists;
   }
 
   /**
@@ -160,13 +160,11 @@ class GStore extends BaseStore {
    */
   read(filename) {
     const rs = this.bucket.file(filename).createReadStream();
-    let contents = null;
     return new Promise((resolve, reject) => {
-      rs.on("error", (err) => reject(err));
-      rs.on("data", (data) => {
-        contents = contents ? Buffer.concat([contents, data]) : data;
-      });
-      rs.on("end", () => resolve(contents));
+      const chunks = [];
+      rs.on("error", reject);
+      rs.on("data", (chunk) => chunks.push(chunk));
+      rs.on("end", () => resolve(Buffer.concat(chunks)));
     });
   }
 
