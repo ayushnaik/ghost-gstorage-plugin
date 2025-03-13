@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/ayushnaik/ghost-gstorage-plugin.git"
+    "url": "git+https://github.com/ayushnaik/ghost-gstorage-plugin.git"
   },
   "keywords": [
     "ghost",
