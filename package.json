@@ -1,7 +1,7 @@
 {
   "name": "ghost-gstorage-plugin",
   "version": "1.0.2",
-  "description": "A Ghost Blog storage adapter plugin for Google Cloud Storage, enabling seamless integration and management of media files.",
+  "description": "A comprehensive Ghost Blog storage adapter plugin for Google Cloud Storage, supporting all media types including images, videos, audio files, and documents.",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -15,7 +15,12 @@
     "google cloud",
     "storage",
     "plugin",
-    "blog"
+    "blog",
+    "media",
+    "files",
+    "images",
+    "videos",
+    "documents"
   ],
   "author": "Ayush Naik <ayushnaik.dev@gmail.com>",
   "license": "MIT",
@@ -25,9 +30,9 @@
   "homepage": "https://github.com/ayushnaik/ghost-gstorage-plugin#readme",
   "type": "commonjs",
   "dependencies": {
-    "@google-cloud/storage": "^7.15.2",
-    "ghost-storage-base": "^0.0.3",
-    "mime-types": "^2.1.35",
+    "@google-cloud/storage": "^7.16.0",
+    "ghost-storage-base": "^1.1.1",
+    "mime-types": "^3.0.1",
     "path": "^0.12.7"
   }
 }
