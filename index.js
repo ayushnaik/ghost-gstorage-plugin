@@ -11,18 +11,18 @@ const mime = require("mime-types");
  */
 class GStore extends BaseStore {
   /**
-   * Create a new GStore instance.
-   * Initializes Google Cloud Storage client and sets up asset domain and base path.
+   * Constructs a new GStore instance.
+   * Initializes the Google Cloud Storage client and sets up asset domain and base path.
    *
    * @param {Object} config - Configuration object for GStore.
    * @param {string} config.projectId - Google Cloud project ID.
-   * @param {string} config.keyFilename - Path to the service account key file.
-   * @param {string} config.key - Alternative to keyFilename, path to the service account key file.
+   * @param {string} [config.keyFilename] - Path to the service account key file.
+   * @param {string} [config.key] - Alternative to keyFilename, path to the service account key file.
    * @param {string} config.bucket - Name of the GCS bucket.
-   * @param {string} [config.assetDomain] - Optional custom asset domain.
-   * @param {boolean} [config.insecure] - Use http instead of https for asset domain.
-   * @param {number} [config.maxAge] - Cache max-age in seconds.
-   * @param {string} [config.basePath] - Optional base path for uploads.
+   * @param {string} [config.assetDomain] - Optional custom asset domain (e.g. CDN URL).
+   * @param {boolean} [config.insecure] - If true, use http instead of https for asset domain.
+   * @param {number} [config.maxAge] - Cache max-age in seconds (default: 2678400).
+   * @param {string} [config.basePath] - Optional base path for uploads within the bucket.
    * @param {string} [config.uploadFolderPath] - Optional override for upload folder path.
    */
   constructor(config = {}) {
@@ -33,23 +33,28 @@ class GStore extends BaseStore {
       projectId: this.options.projectId,
       keyFilename: this.options.key || this.options.keyFilename,
     });
-    this.bucket = gcs.bucket(this.options.bucket);
 
+    this.bucket = gcs.bucket(this.options.bucket);
     this.insecure = !!this.options.insecure;
     this.maxAge =
       typeof this.options.maxAge === "number" ? this.options.maxAge : 2678400;
+
     this._initializeAssetDomain();
   }
 
   /**
    * Initializes the asset domain and base path based on the configuration.
-   * Sets this.assetDomain and this.basePath.
+   * Sets this.assetDomain and this.basePath for use in URL generation and file organization.
+   *
+   * Handles custom asset domains, protocol selection, and upload folder overrides.
+   *
+   * @private
    */
   _initializeAssetDomain() {
     const { assetDomain, bucket, insecure, basePath, uploadFolderPath } =
       this.options;
 
-    if (assetDomain && /^https?:\/\//i.test(assetDomain)) {
+    if (assetDomain && /^https?:\/\/$/i.test(assetDomain)) {
       try {
         const url = new URL(assetDomain);
         const segments = url.pathname.split("/").filter(Boolean);
@@ -78,8 +83,9 @@ class GStore extends BaseStore {
 
   /**
    * Builds the standard date-based folder structure ("YYYY/MM").
+   * Used to organize files by upload date.
    *
-   * @returns {string} The date-based folder structure.
+   * @returns {string} The date-based folder structure (e.g. "2024/06").
    */
   getTargetDir() {
     const now = new Date();
@@ -90,7 +96,7 @@ class GStore extends BaseStore {
 
   /**
    * Determines the file type category based on the file extension and MIME type.
-   * Used to organize files into appropriate folders.
+   * Used to organize files into appropriate folders: 'images', 'media', or 'files'.
    *
    * @param {Object} file - The file object.
    * @param {string} [file.name] - The file name.
@@ -105,6 +111,7 @@ class GStore extends BaseStore {
       "file";
     const ext = path.extname(fileName).toLowerCase();
     let mimeType = "";
+
     if (file && file.path) {
       mimeType = mime.lookup(file.path) || file.type || "";
     } else if (file && file.name) {
@@ -167,6 +174,7 @@ class GStore extends BaseStore {
 
   /**
    * Creates a unique file name using the target directory, base file name, and timestamp.
+   * Ensures no filename collisions and preserves file extension.
    *
    * @param {Object} file - The file object (expects file.name or file.path).
    * @param {string} targetDir - The target directory (e.g. basePath + "YYYY/MM").
@@ -185,62 +193,12 @@ class GStore extends BaseStore {
   }
 
   /**
-   * Uploads a file to Google Cloud Storage and returns the public URL of the uploaded file.
-   *
-   * @param {Object} file - The file object with file.path and optionally file.name / file.type.
-   * @param {string} file.path - The local path to the file.
-   * @param {string} [file.name] - The original file name.
-   * @param {string} [file.type] - The MIME type.
-   * @returns {Promise<string>} The public URL of the uploaded file.
-   * @throws {Error} If Google Cloud Storage is not configured or file is invalid.
-   */
-  async save(file) {
-    if (!this.options) {
-      throw new Error("Google Cloud Storage is not configured.");
-    }
-    if (!file || !file.path) {
-      throw new Error("File object with a valid path is required.");
-    }
-
-    const fileType = this.getFileTypeCategory(file);
-
-    const dateFolder = this.getTargetDir();
-
-    let targetDir;
-    if (this.basePath) {
-      targetDir = `${this.basePath}/${fileType}/${dateFolder}`;
-    } else {
-      targetDir = `${fileType}/${dateFolder}`;
-    }
-    targetDir = targetDir.replace(/\\/g, "/");
-
-    const storageKey = this.getUniqueFileName(file, targetDir);
-    const contentType =
-      mime.lookup(file.path) || file.type || "application/octet-stream";
-
-    const opts = {
-      destination: storageKey,
-      metadata: {
-        cacheControl: `public, max-age=${this.maxAge}`,
-        contentType,
-      },
-      public: true,
-    };
-
-    await this.bucket.upload(file.path, opts);
-
-    const baseDomain = this.assetDomain.replace(/\/+$/, "");
-    return `${baseDomain}/${storageKey}`
-      .replace(/\/{2,}/g, "/")
-      .replace(":/", "://");
-  }
-
-  /**
    * Converts a public URL back to the storage file path.
    * Required by Ghost for media operations like thumbnail generation.
+   * Handles URLs with assetDomain, Google Storage API, or custom domains.
    *
    * @param {string} url - The public URL of the file.
-   * @returns {string} The storage file path.
+   * @returns {string} The storage file path relative to the bucket root.
    */
   urlToPath(url) {
     if (!url || typeof url !== "string") {
@@ -278,16 +236,78 @@ class GStore extends BaseStore {
   }
 
   /**
-   * Returns a middleware function that does nothing, as files are served via the public URL.
+   * Uploads a file to Google Cloud Storage and returns its public URL.
    *
-   * @returns {Function} A middleware function for Ghost.
+   * @param {Object} file - The file object with file.path and optionally file.name / file.type.
+   * @param {string} file.path - The local path to the file.
+   * @param {string} [file.name] - The original file name.
+   * @param {string} [file.type] - The MIME type.
+   * @returns {Promise<string>} Resolves to the public URL of the uploaded file.
+   * @throws {Error} If Google Cloud Storage is not configured or file is invalid.
+   */
+  async save(file) {
+    if (!this.options) {
+      throw new Error("Google Cloud Storage is not configured.");
+    }
+
+    if (!file || !file.path) {
+      throw new Error("File object with a valid path is required.");
+    }
+
+    const fileType = this.getFileTypeCategory(file);
+    const dateFolder = this.getTargetDir();
+    let targetDir;
+
+    if (this.basePath) {
+      targetDir = `${this.basePath}/${fileType}/${dateFolder}`;
+    } else {
+      targetDir = `${fileType}/${dateFolder}`;
+    }
+
+    targetDir = targetDir.replace(/\\/g, "/").replace(/\/+/g, "/");
+
+    const storageKey = this.getUniqueFileName(file, targetDir);
+    const contentType =
+      mime.lookup(file.path) || file.type || "application/octet-stream";
+
+    const opts = {
+      destination: storageKey,
+      metadata: {
+        cacheControl: `public, max-age=${this.maxAge}`,
+        contentType,
+      },
+      public: true,
+    };
+
+    await this.bucket.upload(file.path, opts);
+
+    const cleanAssetDomain = this.assetDomain.replace(/\/+$/, "");
+    const cleanStorageKey = storageKey.replace(/^\/+/, "");
+
+    const fullUrl = `${cleanAssetDomain}/${cleanStorageKey}`;
+
+    const urlParts = fullUrl.split("://");
+    if (urlParts.length === 2) {
+      const protocol = urlParts[0];
+      const pathPart = urlParts[1].replace(/\/+/g, "/");
+      return `${protocol}://${pathPart}`;
+    } else {
+      return fullUrl.replace(/\/+/g, "/");
+    }
+  }
+
+  /**
+   * Returns a middleware function that does nothing, as files are served via the public URL.
+   * This is required by Ghost's storage adapter interface.
+   *
+   * @returns {Function} A middleware function for Ghost (no-op).
    */
   serve() {
     return (req, res, next) => next();
   }
 
   /**
-   * Checks if a file exists in the specified target directory.
+   * Checks if a file exists in the specified target directory in Google Cloud Storage.
    *
    * @param {string} filename - The name of the file to check.
    * @param {string} targetDir - The target directory where the file is expected to be.
@@ -306,7 +326,7 @@ class GStore extends BaseStore {
   /**
    * Reads the contents of a file from Google Cloud Storage.
    *
-   * @param {string} filename - The name of the file to read.
+   * @param {string} filename - The name of the file to read (relative to the bucket root).
    * @returns {Promise<Buffer>} Resolves to the contents of the file as a Buffer.
    */
   read(filename) {
@@ -321,13 +341,27 @@ class GStore extends BaseStore {
 
   /**
    * Deletes a file from Google Cloud Storage.
+   * Accepts either a direct storage path or a public URL (which will be converted).
+   * Ignores errors if the file does not exist.
    *
-   * @param {string} filename - The name of the file to delete.
-   * @returns {Promise} Resolves when the file is deleted.
+   * @param {string} filename - The name/path of the file to delete, or a full URL.
+   * @returns {Promise<void>} Resolves when the file is deleted or if it does not exist.
    */
   async delete(filename) {
     try {
-      await this.bucket.file(filename).delete();
+      let filePath = filename;
+      if (
+        filename &&
+        (filename.startsWith("http://") || filename.startsWith("https://"))
+      ) {
+        filePath = this.urlToPath(filename);
+      }
+
+      if (!filePath) {
+        return;
+      }
+
+      await this.bucket.file(filePath).delete();
     } catch (err) {
       if (err && err.code === 404) {
         return;
