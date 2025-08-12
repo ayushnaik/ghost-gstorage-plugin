@@ -236,6 +236,48 @@ class GStore extends BaseStore {
   }
 
   /**
+   * Converts a public URL back to the storage file path.
+   * Required by Ghost for media operations like thumbnail generation.
+   *
+   * @param {string} url - The public URL of the file.
+   * @returns {string} The storage file path.
+   */
+  urlToPath(url) {
+    if (!url || typeof url !== "string") {
+      return "";
+    }
+
+    try {
+      let filePath = "";
+
+      if (url.startsWith(this.assetDomain)) {
+        filePath = url.substring(this.assetDomain.length);
+      } else {
+        const bucketPattern = new RegExp(
+          `^https?://[^/]*googleapis\\.com/${this.options.bucket}/`
+        );
+        if (bucketPattern.test(url)) {
+          filePath = url.replace(bucketPattern, "");
+        } else {
+          const urlObj = new URL(url);
+          filePath = urlObj.pathname;
+
+          if (filePath.startsWith(`/${this.options.bucket}/`)) {
+            filePath = filePath.substring(`/${this.options.bucket}/`.length);
+          }
+        }
+      }
+
+      filePath = filePath.replace(/^\/+/, "").replace(/\/+/g, "/");
+
+      return filePath;
+    } catch (error) {
+      const parts = url.split("/");
+      return parts[parts.length - 1] || "";
+    }
+  }
+
+  /**
    * Returns a middleware function that does nothing, as files are served via the public URL.
    *
    * @returns {Function} A middleware function for Ghost.
